@@ -2,11 +2,17 @@ from tape import Tape
 from transition import Transition
 
 
-class R_turing_machine:
+class RTM:
     def setup(self, states, input_alphabet, tape_alphabet, start_state, accept_state):
+        self.message_callback = None
+
+        self.undo_stack = []
+
+        self.saved_history = []
+        self.saved_history_head = 0
+
         self.stage = 1
         self.finished_stage1 = False
-        self.undo_pointer = None
         self.states = states
         self.input_alphabet = input_alphabet
         self.tape_alphabet = tape_alphabet
@@ -49,15 +55,22 @@ class R_turing_machine:
 
     def step(self):
         if self.stage != 1 or self.finished_stage1:
-            print("Não é possível executar mais passos.")
-            return False
+            self.notify("Não é possível executar mais passos.")
+            return
 
         key = self.get_actual_key()
         t = self.get_transition(key)
         if getattr(t, "direction", 'N') == 'N':
-            print("Erro: transição não existente.")
+            self.notify("Erro: transição não existente.")
             self.finished_stage1 = True
-            return False
+            return
+
+        self.undo_stack.append((
+            self.current_state,
+            self.input_tape.head_position,
+            key[1],
+            self.output_tape.content.copy()
+        ))
 
         self.history_tape.content[self.history_tape.head_position] = str(key[0])
         self.history_tape.head_position += 1
@@ -65,7 +78,6 @@ class R_turing_machine:
         self.history_tape.head_position += 1
 
         self.input_tape.content[self.input_tape.head_position] = t.write_symbol
-        self.undo_pointer = (self.current_state, self.input_tape.head_position, key[1])
 
         if t.direction == 'R':
             self.input_tape.head_position += 1
@@ -73,31 +85,40 @@ class R_turing_machine:
             self.input_tape.head_position -= 1
 
         self.current_state = t.next_state
-        print(f"Estado atual: {self.current_state}")
+        self.notify(f"Estado atual: {self.current_state}")
         if self.current_state == self.final_state:
-            print("Estágio 1 finalizado.")
+            self.notify("Estágio 1 finalizado.")
             self.finished_stage1 = True
-        return True
+        return
 
 
     def undo(self):
-        if self.undo_pointer is None:
-            print("Nada para desfazer.")
+        if not self.undo_stack:
+            self.notify("Nada para desfazer.")
             return
 
-        state, pos, original_symbol = self.undo_pointer
+        # Restaura histórico se estiver vazio (depois do stage3)
+        if all(c == 'B' for c in self.history_tape.content) and self.saved_history:
+            self.history_tape.content = self.saved_history[:]
+            self.history_tape.head_position = self.saved_history_head
+
+        state, pos, original_symbol, output_snapshot = self.undo_stack.pop()
         self.input_tape.head_position = pos
         self.input_tape.content[pos] = original_symbol
         self.current_state = state
+        self.output_tape.content = output_snapshot.copy()
+
         self.history_tape.head_position -= 2
         self.history_tape.content[self.history_tape.head_position] = 'B'
         self.history_tape.content[self.history_tape.head_position + 1] = 'B'
         self.finished_stage1 = False
-        self.undo_pointer = None
-        print("Última transição desfeita.")
+        self.notify("Passo desfeito.")
 
 
     def run_all(self):
+        if self.finished_stage1:
+            self.notify("Todos os passos ja foram executados.")
+            return
         self.stage1()
         self.stage2()
         self.stage3()
@@ -106,37 +127,39 @@ class R_turing_machine:
     def stage1(self):
         while self.current_state != self.final_state:
             symbol = self.input_tape.content[self.input_tape.head_position]
-            print(f"\nEstado atual: {self.current_state}, Simbolo lido: {symbol}")
+            self.notify(f"\nEstado atual: {self.current_state}, Simbolo lido: {symbol}")
             success = self.apply_transition(self.breaks_quintuple_apart(
                 self.get_actual_key(), self.get_transition(self.get_actual_key())))
             if not success:
-                print("Erro durante a aplicação da transição.")
+                self.notify("Erro durante a aplicação da transição.")
                 break
-        print(f"\nFinal do estagio 1. Estado final: {self.current_state}")
-        self.print_tape()
+        self.notify(f"\nFinal do estagio 1. Estado final: {self.current_state}")
+        self.finished_stage1 = True
 
 
     def stage2(self):
         self.output_tape.content = self.input_tape.content[:]
-        print("Final do estagio 2. Saída copiada para fita 3.")
-        self.print_tape()
+        self.notify("Final do estagio 2. Saída copiada para fita 3.")
 
 
     def stage3(self):
-        print("Estágio 3: Inversão das transições.")
+        self.notify("Estágio 3: Inversão das transições.")
+
+        self.saved_history = self.history_tape.content.copy()
+        self.saved_history_head = self.history_tape.head_position
+
         for i in range(self.history_tape.head_position - 2, -1, -2):
             key_state = int(self.history_tape.content[i])
             key_symbol = self.history_tape.content[i + 1]
             key = (key_state, key_symbol)
             reversed_transition = self.reverts_quadruple(
                 self.breaks_quintuple_apart(key, self.get_transition(key)))
-            print(f"\nEstado atual: {self.current_state}, Próximo Estado: {key_state}")
-            print(f"Símbolo lido: {self.input_tape.content[self.input_tape.head_position]}")
+            self.notify(f"\nEstado atual: {self.current_state}, Próximo Estado: {key_state}")
+            self.notify(f"Símbolo lido: {self.input_tape.content[self.input_tape.head_position]}")
             self.apply_reversed_transition(reversed_transition)
             self.current_state = key_state
             self.history_tape.content[i] = 'B'
             self.history_tape.content[i + 1] = 'B'
-        self.print_tape()
 
 
     def breaks_quintuple_apart(self, current, t):
@@ -154,13 +177,20 @@ class R_turing_machine:
 
     def apply_transition(self, transition):
         if not (0 <= self.input_tape.head_position < len(self.input_tape.content)):
-            print("Erro: Cabeçote fora dos limites da fita!")
+            self.notify("Erro: Cabeçote fora dos limites da fita!")
             return False
         if transition[0][3] == 'N':
-            print("Erro: transição não existente.")
+            self.notify("Erro: transição não existente.")
             return False
 
         key_move = self.get_actual_key()
+        self.undo_stack.append((
+            self.current_state,
+            self.input_tape.head_position,
+            key_move[1],
+            self.output_tape.content.copy()
+        ))
+
         self.history_tape.content[self.history_tape.head_position] = str(key_move[0])
         self.history_tape.head_position += 1
         self.history_tape.content[self.history_tape.head_position] = key_move[1]
@@ -175,7 +205,7 @@ class R_turing_machine:
             self.input_tape.head_position += 1
 
         self.current_state = second[2]
-        print(f"Símbolo escrito: {self.input_tape.content[self.input_tape.head_position]}, Próximo Estado: {self.current_state}")
+        self.notify(f"Símbolo escrito: {self.input_tape.content[self.input_tape.head_position]}, Próximo Estado: {self.current_state}")
         return True
 
 
@@ -187,12 +217,14 @@ class R_turing_machine:
             self.input_tape.head_position += 1
 
         self.input_tape.content[self.input_tape.head_position] = second[1]
-        print(f"Símbolo escrito: {self.input_tape.content[self.input_tape.head_position]}")
+        self.notify(f"Símbolo escrito: {self.input_tape.content[self.input_tape.head_position]}")
         return True
 
 
-    def print_tape(self):
-        print("\nInput:  ", ''.join(c for c in self.input_tape.content if c != 'B'))
-        print("History:", ''.join(c for c in self.history_tape.content if c != 'B'))
-        print("Output: ", ''.join(c for c in self.output_tape.content if c != 'B'))
-        print()
+    def set_message_callback(self, callback):
+        self.message_callback = callback
+
+
+    def notify(self, msg):
+        if self.message_callback:
+            self.message_callback(msg)
