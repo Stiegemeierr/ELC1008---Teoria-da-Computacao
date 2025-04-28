@@ -44,7 +44,7 @@ class RTM:
         self.transitions[(state, read_symbol)] = t
 
 
-    def get_actual_key(self):
+    def get_key(self):
         read_symbol = self.input_tape.content[self.input_tape.head_position]
         return (self.current_state, read_symbol)
 
@@ -58,7 +58,7 @@ class RTM:
             self.notify("Não é possível executar mais passos.")
             return
 
-        key = self.get_actual_key()
+        key = self.get_key()
         t = self.get_transition(key)
         if getattr(t, "direction", 'N') == 'N':
             self.notify("Erro: transição não existente.")
@@ -128,8 +128,8 @@ class RTM:
         while self.current_state != self.final_state:
             symbol = self.input_tape.content[self.input_tape.head_position]
             self.notify(f"\nEstado atual: {self.current_state}, Simbolo lido: {symbol}")
-            success = self.apply_transition(self.breaks_quintuple_apart(
-                self.get_actual_key(), self.get_transition(self.get_actual_key())))
+            success = self.apply_transition(self.breaks_quintuple(
+                self.get_key(), self.get_transition(self.get_key())))
             if not success:
                 self.notify("Erro durante a aplicação da transição.")
                 break
@@ -153,7 +153,7 @@ class RTM:
             key_symbol = self.history_tape.content[i + 1]
             key = (key_state, key_symbol)
             reversed_transition = self.reverts_quadruple(
-                self.breaks_quintuple_apart(key, self.get_transition(key)))
+                self.breaks_quintuple(key, self.get_transition(key)))
             self.notify(f"\nEstado atual: {self.current_state}, Próximo Estado: {key_state}")
             self.notify(f"Símbolo lido: {self.input_tape.content[self.input_tape.head_position]}")
             self.apply_reversed_transition(reversed_transition)
@@ -162,7 +162,7 @@ class RTM:
             self.history_tape.content[i + 1] = 'B'
 
 
-    def breaks_quintuple_apart(self, current, t):
+    def breaks_quintuple(self, current, t):
         first = (current[0], current[1], t.next_state, t.write_symbol)
         second = (t.next_state, t.write_symbol, t.next_state, t.direction)
         return first, second
@@ -183,7 +183,7 @@ class RTM:
             self.notify("Erro: transição não existente.")
             return False
 
-        key_move = self.get_actual_key()
+        key_move = self.get_key()
         self.undo_stack.append((
             self.current_state,
             self.input_tape.head_position,
