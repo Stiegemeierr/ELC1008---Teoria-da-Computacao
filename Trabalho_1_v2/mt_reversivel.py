@@ -60,26 +60,7 @@ class RTM:
             self.finished_stage1 = True
             return
 
-        self.undo_stack.append((
-            self.current_state,
-            self.input_tape.head_position,
-            key[1],
-            self.output_tape.content.copy()
-        ))
-
-        self.history_tape.content[self.history_tape.head_position] = str(key[0])
-        self.history_tape.head_position += 1
-        self.history_tape.content[self.history_tape.head_position] = key[1]
-        self.history_tape.head_position += 1
-
-        self.input_tape.content[self.input_tape.head_position] = transition.write_symbol
-
-        if transition.direction == 'R':
-            self.input_tape.head_position += 1
-        elif transition.direction == 'L':
-            self.input_tape.head_position -= 1
-
-        self.current_state = transition.next_state
+        self._apply_transition(key, transition)
         self._notify(f"Current state: {self.current_state}")
 
         if self.current_state == self.accept_state:
